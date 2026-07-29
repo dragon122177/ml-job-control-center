@@ -1,0 +1,408 @@
+openapi: 3.1.0
+info:
+  title: ML Job Control Center API
+  version: 2.0.0
+  description: Control-plane API for machine-learning workload operations.
+servers:
+  - url: http://localhost:4100/api
+    description: Local development
+tags:
+  - name: Authentication
+  - name: Jobs
+  - name: Catalog
+  - name: Operations
+paths:
+  /health:
+    get:
+      summary: Check service health
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, examples: [ok] }
+                  service: { type: string }
+                  database: { type: string, enum: [embedded, postgres] }
+                  time: { type: string, format: date-time }
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate a user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 6 }
+      responses:
+        "200":
+          description: Authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /dashboard:
+    get:
+      summary: Read the operational dashboard
+      responses:
+        "200":
+          description: Dashboard metrics, workloads, and alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  metrics:
+                    type: object
+                    additionalProperties: true
+                  recentJobs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Job" }
+                  alerts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Alert" }
+                  generatedAt: { type: string, format: date-time }
+  /events:
+    get:
+      summary: Subscribe to realtime control-plane events
+      description: Long-lived server-sent event stream authenticated with a bearer token.
+      responses:
+        "200":
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /jobs:
+    get:
+      tags: [Jobs]
+      summary: Filter workloads
+      parameters:
+        - in: query
+          name: status
+          schema: { $ref: "#/components/schemas/JobStatus" }
+        - in: query
+          name: projectId
+          schema: { type: string }
+        - in: query
+          name: search
+          schema: { type: string }
+      responses:
+        "200":
+          description: Matching workloads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Job" }
+                  counts:
+                    type: object
+                    additionalProperties: { type: integer }
+    post:
+      tags: [Jobs]
+      summary: Create a workload
+      description: Requires ADMIN or OPERATOR.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJob"
+      responses:
+        "202":
+          description: Workload accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /jobs/{jobId}:
+    get:
+      tags: [Jobs]
+      summary: Read job telemetry and event history
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Detailed workload
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Job"
+                  - type: object
+                    properties:
+                      events:
+                        type: array
+                        items: { $ref: "#/components/schemas/JobEvent" }
+                      metrics:
+                        type: array
+                        items: { $ref: "#/components/schemas/Metric" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /jobs/{jobId}/cancel:
+    post:
+      tags: [Jobs]
+      summary: Cancel a scheduled, queued, or running job
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "202":
+          description: Cancellation accepted
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /jobs/{jobId}/retry:
+    post:
+      tags: [Jobs]
+      summary: Retry a failed or cancelled job
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "202":
+          description: Retry queued
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /catalog/projects:
+    get:
+      tags: [Catalog]
+      summary: List projects
+      responses:
+        "200":
+          description: Project catalog
+    post:
+      tags: [Catalog]
+      summary: Create a project
+      description: Requires ADMIN or OPERATOR.
+      responses:
+        "201":
+          description: Project created
+  /catalog/datasets:
+    get:
+      tags: [Catalog]
+      summary: List datasets
+      responses:
+        "200":
+          description: Dataset catalog
+  /catalog/experiments:
+    get:
+      tags: [Catalog]
+      summary: List experiments
+      responses:
+        "200":
+          description: Experiment catalog
+    post:
+      tags: [Catalog]
+      summary: Create an experiment
+      responses:
+        "201":
+          description: Experiment created
+  /catalog/models:
+    get:
+      tags: [Catalog]
+      summary: List registered model versions
+      responses:
+        "200":
+          description: Model registry
+  /operations/workers:
+    get:
+      tags: [Operations]
+      summary: Read worker capacity
+      responses:
+        "200":
+          description: Worker fleet
+  /operations/alerts:
+    get:
+      tags: [Operations]
+      summary: Read operational alerts
+      responses:
+        "200":
+          description: Alert center
+  /operations/alerts/{alertId}/acknowledge:
+    post:
+      tags: [Operations]
+      summary: Acknowledge an alert
+      parameters:
+        - in: path
+          name: alertId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Alert acknowledged
+  /operations/audit:
+    get:
+      tags: [Operations]
+      summary: Read the administrative audit history
+      description: Requires ADMIN.
+      responses:
+        "200":
+          description: Audit events
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /operations/system:
+    get:
+      tags: [Operations]
+      summary: Read runtime diagnostics
+      responses:
+        "200":
+          description: Database, scheduler, and runtime status
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    JobId:
+      in: path
+      name: jobId
+      required: true
+      schema: { type: string }
+  schemas:
+    Session:
+      type: object
+      required: [token, user]
+      properties:
+        token: { type: string }
+        user:
+          type: object
+          required: [id, email, name, role]
+          properties:
+            id: { type: string }
+            email: { type: string, format: email }
+            name: { type: string }
+            role: { type: string, enum: [ADMIN, OPERATOR, VIEWER] }
+    JobStatus:
+      type: string
+      enum: [SCHEDULED, QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED]
+    Job:
+      type: object
+      required: [id, projectId, name, type, status, priority, framework, progress]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        projectName: { type: string }
+        name: { type: string }
+        type:
+          type: string
+          enum: [TRAINING, EVALUATION, DATA_PREPARATION, BATCH_INFERENCE]
+        status: { $ref: "#/components/schemas/JobStatus" }
+        priority:
+          type: string
+          enum: [LOW, NORMAL, HIGH, CRITICAL]
+        framework: { type: string }
+        requestedGpu: { type: integer }
+        requestedCpu: { type: integer }
+        requestedMemoryGb: { type: integer }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        attempt: { type: integer }
+        maxRetries: { type: integer }
+        workerName: { type: [string, "null"] }
+        errorMessage: { type: [string, "null"] }
+        config: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateJob:
+      type: object
+      required: [projectId, name, type, framework]
+      properties:
+        projectId: { type: string }
+        experimentId: { type: [string, "null"] }
+        datasetId: { type: [string, "null"] }
+        modelId: { type: [string, "null"] }
+        name: { type: string, minLength: 3, maxLength: 120 }
+        type:
+          type: string
+          enum: [TRAINING, EVALUATION, DATA_PREPARATION, BATCH_INFERENCE]
+        priority:
+          type: string
+          enum: [LOW, NORMAL, HIGH, CRITICAL]
+          default: NORMAL
+        framework: { type: string }
+        requestedGpu: { type: integer, minimum: 0, maximum: 8, default: 0 }
+        requestedCpu: { type: integer, minimum: 1, maximum: 64, default: 2 }
+        requestedMemoryGb: { type: integer, minimum: 1, maximum: 512, default: 4 }
+        maxRetries: { type: integer, minimum: 0, maximum: 5, default: 2 }
+        scheduledAt: { type: [string, "null"], format: date-time }
+        config: { type: object, additionalProperties: true }
+    JobEvent:
+      type: object
+      properties:
+        id: { type: string }
+        level: { type: string, enum: [INFO, WARN, ERROR] }
+        event: { type: string }
+        message: { type: string }
+        progress: { type: [integer, "null"] }
+        createdAt: { type: string, format: date-time }
+    Metric:
+      type: object
+      properties:
+        step: { type: integer }
+        loss: { type: number }
+        accuracy: { type: number }
+        gpuUtilization: { type: number }
+        memoryUsedGb: { type: number }
+        createdAt: { type: string, format: date-time }
+    Alert:
+      type: object
+      properties:
+        id: { type: string }
+        severity: { type: string, enum: [LOW, MEDIUM, HIGH] }
+        title: { type: string }
+        message: { type: string }
+        status: { type: string, enum: [OPEN, ACKNOWLEDGED] }
+        source: { type: string }
+        createdAt: { type: string, format: date-time }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}
+  responses:
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Role does not allow the operation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InvalidRequest:
+      description: Request validation failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Lifecycle or retry-policy conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+security:
+  - bearerAuth: []
