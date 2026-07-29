@@ -1,0 +1,23 @@
+{
+  "name": "ml-job-control-center",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n API,WEB -c cyan,magenta \"npm run dev -w @mlcc/api\" \"npm run dev -w @mlcc/web\"",
+    "build": "npm run build -w @mlcc/api && npm run build -w @mlcc/web",
+    "test": "npm run test -w @mlcc/api && npm run test -w @mlcc/web",
+    "typecheck": "npm run typecheck -w @mlcc/api && npm run typecheck -w @mlcc/web",
+    "start": "npm run start -w @mlcc/api",
+    "format:check": "npm run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
